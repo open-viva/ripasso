@@ -57,7 +57,8 @@ async function get(session, path) {
     throw Object.assign(new Error('Sessione ClasseViva assente.'), { code: 'SESSION_EXPIRED' });
   }
 
-  return proxyJson(`${session.proxyUrl}/proxy?path=${encodeURIComponent('/' + path.replace(/^\/+/, ''))}`, {
+  const full = '/rest/w1/' + path.replace(/^\/+/, '');
+  return proxyJson(`${session.proxyUrl}/proxy?path=${encodeURIComponent(full)}`, {
     method: 'GET',
     headers: { 'X-CV-Cookie': session.cookie },
   });
