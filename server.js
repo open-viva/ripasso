@@ -204,7 +204,7 @@ http
           MODEL_ERROR: 502,
         };
         console.error(`[${key}]`, err.code || '', err.message);
-        json(res, map[err.code] || 500, {
+        json(res, err.status || map[err.code] || 500, {
           error: err.message || 'Errore interno',
           code: err.code || 'UNKNOWN',
         });
