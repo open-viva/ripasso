@@ -103,6 +103,7 @@
       <button data-v="compiti"><i data-lucide="notebook-pen" width="16" height="16"></i>Compiti<span class="count" id="c-compiti"></span></button>
       <button data-v="materie"><i data-lucide="chart-no-axes-column" width="16" height="16"></i>Materie<span class="count" id="c-materie"></span></button>
       <button data-v="bacheca"><i data-lucide="megaphone" width="16" height="16"></i>Bacheca<span class="count" id="c-bacheca"></span></button>
+      <button data-v="preferenze"><i data-lucide="sliders-horizontal" width="16" height="16"></i>Preferenze</button>
       <button data-v="sorgenti"><i data-lucide="cable" width="16" height="16"></i>Sorgenti</button>
     </nav>
 
@@ -128,6 +129,8 @@
           <button class="btn" id="regen"><i data-lucide="sparkles" width="15" height="15"></i>Genera piano</button>
         </div>
       </div>
+
+      <div class="weektabs" id="weektabs"></div>
 
       <div id="plan-msg"></div>
       <div class="plan" id="plan"></div>
@@ -188,6 +191,48 @@
         <span class="eyebrow" id="notice-count"></span>
       </div>
       <div class="notices" id="notices"></div>
+    </section>
+
+    <!-- study preferences -->
+    <section class="view" id="v-preferenze">
+      <div class="head">
+        <div>
+          <h1>Preferenze di <b>studio</b></h1>
+          <p class="sub">Il modello ne tiene conto quando genera il piano. Non sono vincoli imposti a valle come gli orari dei blocchi: se il piano non le rispetta del tutto, rigeneralo dopo averle salvate.</p>
+        </div>
+      </div>
+
+      <div class="panel prefpanel">
+        <h3>Giorni da evitare</h3>
+        <p class="hint">Nessun blocco di studio verrà messo in questi giorni, qualunque cosa succeda.</p>
+        <div class="daypicker" id="pref-days">
+          <button type="button" data-day="lun" aria-pressed="false">Lun</button>
+          <button type="button" data-day="mar" aria-pressed="false">Mar</button>
+          <button type="button" data-day="mer" aria-pressed="false">Mer</button>
+          <button type="button" data-day="gio" aria-pressed="false">Gio</button>
+          <button type="button" data-day="ven" aria-pressed="false">Ven</button>
+          <button type="button" data-day="sab" aria-pressed="false">Sab</button>
+          <button type="button" data-day="dom" aria-pressed="false">Dom</button>
+        </div>
+
+        <h3 style="margin-top:var(--s6)">Fascia preferita</h3>
+        <p class="hint">Quando possibile, il modello colloca i blocchi in questa fascia della giornata.</p>
+        <select id="pref-time" class="pref-select">
+          <option value="indifferente">Indifferente</option>
+          <option value="mattina">Mattina</option>
+          <option value="pomeriggio">Pomeriggio</option>
+          <option value="sera">Sera</option>
+        </select>
+
+        <h3 style="margin-top:var(--s6)">Altre indicazioni</h3>
+        <p class="hint">Testo libero: attività fisse, preferenze per materia, durata dei blocchi che preferisci.</p>
+        <textarea id="pref-notes" class="pref-notes" rows="4" maxlength="600" placeholder="Es. martedì e giovedì ho danza fino alle 19, preferisco blocchi brevi per matematica"></textarea>
+
+        <div class="prefsave">
+          <button class="btn" id="pref-save"><i data-lucide="check" width="15" height="15"></i>Salva preferenze</button>
+          <span class="eyebrow" id="pref-saved" hidden style="color:var(--olive)">salvate</span>
+        </div>
+      </div>
     </section>
 
     <!-- sources -->

@@ -126,6 +126,18 @@ main{min-width:0; padding:var(--s7) var(--s7) var(--s8)}
 .sechead{display:flex; align-items:baseline; justify-content:space-between; gap:var(--s4); flex-wrap:wrap}
 
 /* weekly plan */
+.weektabs{display:flex; gap:8px; flex-wrap:wrap; margin-top:var(--s5)}
+.weektabs button{
+  display:flex; align-items:center; gap:6px; padding:7px 13px; border-radius:20px;
+  border:1px solid var(--rule-2); background:var(--surface); color:var(--ink-2); font-size:.8125rem;
+  transition:background .14s var(--e-out), color .14s var(--e-out), border-color .14s var(--e-out);
+}
+.weektabs button:hover{border-color:var(--ink-3); color:var(--ink)}
+.weektabs button[aria-current="true"]{background:var(--ink); border-color:var(--ink); color:var(--paper); font-weight:500}
+.weektabs button .dot{width:6px; height:6px; border-radius:50%; background:var(--olive); flex:none}
+.weektabs button[aria-current="true"] .dot{background:var(--paper)}
+.weekflag{font-size:.75rem; color:var(--amber); display:flex; align-items:center; gap:6px; margin-top:var(--s3)}
+
 .plan{margin-top:var(--s5); border-top:1px solid var(--rule-2)}
 .row{
   display:grid; grid-template-columns:104px minmax(0,1fr); border-bottom:1px solid var(--rule);
@@ -253,6 +265,31 @@ main{min-width:0; padding:var(--s7) var(--s7) var(--s8)}
 .meter div{display:flex; justify-content:space-between; gap:var(--s4); font-size:.8125rem}
 .meter dt{color:var(--ink-3)}
 .meter dd{margin:0; font-family:var(--mono); color:var(--ink)}
+
+/* study preferences */
+.prefpanel{margin-top:var(--s5); max-width:640px}
+.prefpanel h3{font-family:var(--serif); font-weight:400; font-size:1.1875rem}
+.prefpanel .hint{font-size:.8125rem; color:var(--ink-3); margin-top:3px; line-height:1.45}
+.daypicker{display:flex; gap:8px; flex-wrap:wrap; margin-top:var(--s3)}
+.daypicker button{
+  padding:8px 14px; border-radius:8px; border:1px solid var(--rule-2); background:var(--surface);
+  font-size:.8125rem; font-weight:500; color:var(--ink-2);
+  transition:background .14s var(--e-out), color .14s var(--e-out), border-color .14s var(--e-out);
+}
+.daypicker button:hover{border-color:var(--ink-3); color:var(--ink)}
+.daypicker button[aria-pressed="true"]{background:var(--accent-soft); border-color:oklch(87% 0.06 36); color:var(--accent-deep)}
+.pref-select{
+  display:block; margin-top:var(--s3); width:100%; max-width:280px; padding:9px 11px; border-radius:7px;
+  border:1.5px solid var(--rule-2); background:var(--surface); color:var(--ink); font-size:.9375rem;
+}
+.pref-select:focus{border-color:var(--ink); outline:none}
+.pref-notes{
+  display:block; margin-top:var(--s3); width:100%; padding:10px 12px; border-radius:8px;
+  border:1.5px solid var(--rule-2); background:var(--surface); color:var(--ink); font-size:.9375rem;
+  line-height:1.5; resize:vertical;
+}
+.pref-notes:focus{border-color:var(--ink); outline:none}
+.prefsave{margin-top:var(--s5); display:flex; align-items:center; gap:var(--s3)}
 
 /* banners / errors */
 .banner{

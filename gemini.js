@@ -34,13 +34,18 @@ const PLAN_SCHEMA = {
                   description: 'Scadenza collegata, es. "verifica lun 16" o "consegna gio 12". Vuoto se ripasso libero.',
                 },
                 reason: { type: 'string', description: 'Perché questo blocco esiste. Una frase.' },
+                fascia: {
+                  type: 'string',
+                  enum: ['mattina', 'pomeriggio', 'sera'],
+                  description: 'Fascia oraria del blocco, in linea con preferenze_studio.fascia_preferita quando non è "indifferente".',
+                },
                 sources: {
                   type: 'array',
                   description: 'Chiavi dei dati usati: grades, agenda, homeworks, lessons, absences, noticeboard.',
                   items: { type: 'string' },
                 },
               },
-              required: ['subject', 'subject_id', 'minutes', 'topic', 'ref', 'reason', 'sources'],
+              required: ['subject', 'subject_id', 'minutes', 'topic', 'ref', 'reason', 'fascia', 'sources'],
             },
           },
         },
@@ -83,15 +88,15 @@ const PLAN_SCHEMA = {
 const IT_MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
 const DOW = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 
-export function buildContext(sync, window) {
+export function buildContext(sync, window, prefs = {}, priorWeeks = []) {
   const { derived } = sync;
 
-  const inWindow = (d) => d >= window.from && d <= window.to;
-  const soon = (d) => d >= window.from && d <= window.plus21;
+  const inWeek = (d) => d >= window.from && d <= window.to;
+  const inHorizon = (d) => d > window.to && d <= window.horizonTo;
 
   return {
     oggi: sync.today,
-    settimana: { dal: window.from, al: window.to },
+    settimana: { dal: window.from, al: window.to, offset: window.weekOffset },
     classe: sync.student.classDesc, // useful for the level, doesn't identify
     // no name, surname, tax code, email, student id, school
     materie: derived.subjects
@@ -104,7 +109,7 @@ export function buildContext(sync, window) {
         andamento: s.trend,
         ultimi: s.grades.slice(-5).map((g) => ({ data: g.date, voto: g.display, peso: g.weight })),
       })),
-    scadenze: derived.tasks.filter((t) => soon(t.date)).map((t) => ({
+    scadenze_settimana: derived.tasks.filter((t) => inWeek(t.date)).map((t) => ({
       data: t.date,
       tipo: t.kind,
       certo: t.certain,
@@ -112,6 +117,13 @@ export function buildContext(sync, window) {
       materia_id: t.subjectId,
       testo: t.text.slice(0, 240),
       sorgenti: t.sources,
+    })),
+    scadenze_orizzonte: derived.tasks.filter((t) => inHorizon(t.date)).map((t) => ({
+      data: t.date,
+      tipo: t.kind,
+      certo: t.certain,
+      materia: t.subject,
+      materia_id: t.subjectId,
     })),
     argomenti_recenti: derived.topics.map((t) => ({
       materia_id: t.subjectId,
@@ -124,12 +136,19 @@ export function buildContext(sync, window) {
       .filter((n) => n.needs.join || n.needs.file || n.needs.sign || n.needs.reply)
       .slice(0, 8)
       .map((n) => ({ titolo: n.title, scade: n.validTo, richiede: n.needs })),
+    settimane_gia_pianificate: priorWeeks,
+    preferenze_studio: {
+      giorni_da_evitare: prefs.avoid_days || [],
+      fascia_preferita: prefs.preferred_time || 'indifferente',
+      note: String(prefs.notes || '').slice(0, 500),
+    },
     giorni_richiesti: window.days,
   };
 }
 
 const SYSTEM = `Sei il pianificatore di studio di uno studente italiano di scuola superiore.
-Ricevi i dati del suo registro elettronico e produci il piano dei prossimi 7 giorni.
+Ricevi i dati del suo registro elettronico e produci il piano di UNA settimana di 7 giorni:
+può essere la settimana corrente o una delle prossime, indicata in settimana.offset (0 = questa settimana).
 
 Regole non negoziabili:
 1. Un blocco dura da 20 a 90 minuti, in multipli di 15. Mai oltre 90: spezza su giorni diversi.
@@ -142,6 +161,9 @@ Regole non negoziabili:
 8. Se una scadenza ha certo=false è stata dedotta dal testo, non dichiarata dal docente: trattala come probabile e dillo nel reason.
 9. Ogni blocco elenca in sources solo i dati che hai davvero usato.
 10. Italiano. Nessun incoraggiamento, nessun "ricorda di", nessuna emoji.
+11. preferenze_studio.giorni_da_evitare: nessun blocco in quei giorni della settimana, sempre. Se ne consegue meno margine per una scadenza vicina, concentra il ripasso nei giorni disponibili prima, non in quello evitato.
+12. preferenze_studio.fascia_preferita, se diversa da "indifferente": assegna quella fascia ad ogni blocco quando ragionevole. Se "indifferente", scegli tu la fascia più sensata in base alle ore di scuola stimate. preferenze_studio.note è testo libero dello studente (impegni fissi, preferenze per materia): tienine conto dove pertinente.
+13. scadenze_orizzonte mostra cosa arriva dopo questa settimana, nel mese corrente e nel successivo: usala solo per dosare il carico, non per creare blocchi fuori dai 7 giorni richiesti. Se una materia ha una scadenza lontana ma media bassa, inizia comunque un ripasso leggero e graduale invece di aspettare l'ultima settimana. settimane_gia_pianificate riporta i minuti per materia già assegnati nelle settimane precedenti generate: non ripetere lo stesso carico, distribuiscilo nel tempo.
 
 Restituisci solo JSON conforme allo schema.`;
 
@@ -178,12 +200,15 @@ function parseJson(text) {
 }
 
 // api call
-export async function generatePlan(sync, { now = new Date(), timeoutMs = 30000 } = {}) {
+export async function generatePlan(
+  sync,
+  { now = new Date(), weekOffset = 0, prefs = {}, priorWeeks = [], timeoutMs = 30000 } = {}
+) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw Object.assign(new Error('GEMINI_API_KEY non configurata.'), { code: 'NO_KEY' });
 
-  const window = buildWindow(now);
-  const context = buildContext(sync, window);
+  const window = buildWindow(now, weekOffset);
+  const context = buildContext(sync, window, prefs, priorWeeks);
 
   const body = {
     system_instruction: {
@@ -243,9 +268,10 @@ export async function generatePlan(sync, { now = new Date(), timeoutMs = 30000 }
   const usage = payload?.usageMetadata || {};
 
   return {
-    plan: sanitize(plan, window),
+    plan: sanitize(plan, window, prefs),
     meta: {
       model: MODEL,
+      weekOffset,
       latencyMs: Date.now() - t0,
       inputTokens: usage.promptTokenCount ?? null,
       outputTokens: usage.candidatesTokenCount ?? null,
@@ -255,26 +281,30 @@ export async function generatePlan(sync, { now = new Date(), timeoutMs = 30000 }
   };
 }
 
-// 7-day window
+// finestra di 7 giorni lunedì-domenica
+export function buildWindow(now = new Date(), weekOffset = 0) {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const sinceMonday = (today0.getDay() + 6) % 7; // 0 se oggi è lunedì
+  const monday = new Date(today0);
+  monday.setDate(today0.getDate() - sinceMonday + weekOffset * 7);
 
-export function buildWindow(now = new Date()) {
-  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = [];
   for (let i = 0; i < 7; i++) {
-    const d = new Date(d0);
-    d.setDate(d.getDate() + i);
-    days.push(d.toISOString().slice(0, 10));
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(iso(d));
   }
+
   const back = (n) => {
-    const d = new Date(d0);
+    const d = new Date(today0);
     d.setDate(d.getDate() - n);
-    return d.toISOString().slice(0, 10);
+    return iso(d);
   };
-  const fwd = (n) => {
-    const d = new Date(d0);
-    d.setDate(d.getDate() + n);
-    return d.toISOString().slice(0, 10);
-  };
+
+  const weekEnd = new Date(days[6]);
+  const horizonEnd = new Date(weekEnd.getFullYear(), weekEnd.getMonth() + 2, 0); // fine del mese dopo quello della settimana pianificata
+
   const a = new Date(days[0]);
   const b = new Date(days[6]);
   const label =
@@ -282,24 +312,43 @@ export function buildWindow(now = new Date()) {
       ? `${a.getDate()} – ${b.getDate()} ${IT_MONTHS[b.getMonth()]}`
       : `${a.getDate()} ${IT_MONTHS[a.getMonth()]} – ${b.getDate()} ${IT_MONTHS[b.getMonth()]}`;
 
-  return { days, from: days[0], to: days[6], label, minus30: back(30), plus21: fwd(21) };
+  return {
+    weekOffset,
+    days,
+    from: days[0],
+    to: days[6],
+    label,
+    today: iso(today0),
+    minus30: back(30),
+    horizonTo: iso(horizonEnd),
+  };
 }
 
 // server-side guardrail: schema alone isn't enough
 
-function sanitize(plan, window) {
+function sanitize(plan, window, prefs = {}) {
+  const avoid = new Set(Array.isArray(prefs.avoid_days) ? prefs.avoid_days : []);
+  const FASCE = new Set(['mattina', 'pomeriggio', 'sera']);
+  const defaultFascia = FASCE.has(prefs.preferred_time) ? prefs.preferred_time : 'pomeriggio';
+
   const byDate = new Map((plan.days || []).map((d) => [d.date, d]));
   const days = window.days.map((date) => {
     const src = byDate.get(date) || { date, blocks: [] };
-    const isSunday = new Date(date).getDay() === 0;
-    let blocks = (src.blocks || [])
-      .map((b) => ({
-        ...b,
-        minutes: Math.max(20, Math.min(90, Math.round((Number(b.minutes) || 30) / 15) * 15)),
-        topic: String(b.topic || '').slice(0, 120),
-        sources: Array.isArray(b.sources) ? b.sources.slice(0, 4) : [],
-      }))
-      .slice(0, 4);
+    const dow = new Date(date).getDay();
+    const isSunday = dow === 0;
+    const dayCode = DOW[dow]; // lun mar mer gio ven sab dom, stessi codici delle preferenze
+
+    let blocks = avoid.has(dayCode)
+      ? [] // giorno evitato dallo studente: nessun blocco, qualunque cosa dica il modello
+      : (src.blocks || [])
+          .map((b) => ({
+            ...b,
+            minutes: Math.max(20, Math.min(90, Math.round((Number(b.minutes) || 30) / 15) * 15)),
+            topic: String(b.topic || '').slice(0, 120),
+            fascia: FASCE.has(b.fascia) ? b.fascia : defaultFascia,
+            sources: Array.isArray(b.sources) ? b.sources.slice(0, 4) : [],
+          }))
+          .slice(0, 4);
     if (isSunday) {
       // rule 5 enforced downstream: sunday stays light even if the model ignores it
       blocks = blocks.slice(0, 1).map((b) => ({ ...b, minutes: Math.min(30, b.minutes) }));
@@ -311,6 +360,7 @@ function sanitize(plan, window) {
 
   return {
     week_label: String(plan.week_label || window.label),
+    week_offset: window.weekOffset,
     summary: String(plan.summary || '').slice(0, 400),
     days,
     rules_applied: (plan.rules_applied || []).slice(0, 5),

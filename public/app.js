@@ -4,7 +4,11 @@ const DOW = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 const MONTH = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
 
 let SYNC = null;
-let PLAN = null;
+let PLAN = null;       // piano della settimana attiva: { plan, meta } | null
+let PREFS = null;
+let WEEKS = [];         // [{ offset, from, to, label, days, hasPlan, generatedAt }]
+let ACTIVE_OFFSET = 0;
+const PLANS = new Map(); // offset 
 const tint = new Map(); // subjectId t0 t6 class
 
 // icons (lucide via cdn, loaded once)
@@ -82,7 +86,9 @@ async function boot() {
   }
   $('#gate').hidden = true;
   $('#app').hidden = false;
+  await Promise.all([loadWeeks(), loadPrefs()]);
   await loadSync();
+  await loadPlanForActive();
   icons();
 }
 
@@ -92,6 +98,101 @@ async function loadSync(force = false) {
   SYNC = await api(force ? 'POST' : 'GET', '/api/sync');
   render();
 }
+
+// settimane navigabili
+
+async function loadWeeks() {
+  const res = await api('GET', '/api/weeks');
+  WEEKS = res.weeks;
+  renderWeekTabs();
+}
+
+function weekLabelFor(w) {
+  if (w.offset === 0) return 'Questa settimana';
+  if (w.offset === 1) return 'Settimana prossima';
+  return w.label;
+}
+
+function renderWeekTabs() {
+  $('#weektabs').innerHTML = WEEKS.map(
+    (w) => `<button data-off="${w.offset}" aria-current="${w.offset === ACTIVE_OFFSET}">
+      ${w.hasPlan ? '<span class="dot"></span>' : ''}${esc(weekLabelFor(w))}
+    </button>`
+  ).join('');
+}
+
+$('#weektabs').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-off]');
+  if (!b || b.getAttribute('aria-current') === 'true') return;
+  ACTIVE_OFFSET = Number(b.dataset.off);
+  renderWeekTabs();
+  await loadPlanForActive();
+});
+
+function updateWeekHeader(w) {
+  if (!w) return;
+  $('#week-label').textContent = w.label;
+  if (!SYNC) return;
+  const inWeek = SYNC.derived.tasks.filter((t) => t.date >= w.from && t.date <= w.to);
+  const tests = inWeek.filter((t) => t.kind === 'verifica').length;
+  const hw = inWeek.filter((t) => t.kind === 'compito').length;
+  $('#week-sub').innerHTML = inWeek.length
+    ? `In questi sette giorni: <b>${tests} verifiche</b> e <b>${hw} consegne</b>. Il piano parte da qui, dalle medie e dagli argomenti firmati dai docenti.`
+    : 'Nessuna scadenza in questi sette giorni. Il piano lavora sul recupero graduale delle materie con media più bassa.';
+}
+
+async function loadPlanForActive() {
+  const w = WEEKS.find((x) => x.offset === ACTIVE_OFFSET);
+  updateWeekHeader(w);
+  if (PLANS.has(ACTIVE_OFFSET)) {
+    PLAN = PLANS.get(ACTIVE_OFFSET);
+    PLAN ? renderPlan() : renderPlanShell(w);
+    return;
+  }
+  const res = await api('GET', `/api/plan?offset=${ACTIVE_OFFSET}`);
+  PLAN = res.hasPlan ? { plan: res.plan, meta: res.meta } : null;
+  PLANS.set(ACTIVE_OFFSET, PLAN);
+  PLAN ? renderPlan() : renderPlanShell(w);
+}
+
+// preferenze di studio
+
+async function loadPrefs() {
+  PREFS = await api('GET', '/api/preferences');
+  fillPrefsForm();
+}
+
+function fillPrefsForm() {
+  document.querySelectorAll('#pref-days button').forEach((b) => {
+    b.setAttribute('aria-pressed', String((PREFS.avoid_days || []).includes(b.dataset.day)));
+  });
+  $('#pref-time').value = PREFS.preferred_time || 'indifferente';
+  $('#pref-notes').value = PREFS.notes || '';
+}
+
+$('#pref-days').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-day]');
+  if (!b) return;
+  b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+});
+
+$('#pref-save').addEventListener('click', async () => {
+  const avoid_days = [...document.querySelectorAll('#pref-days button[aria-pressed="true"]')].map((b) => b.dataset.day);
+  const btn = $('#pref-save');
+  btn.disabled = true;
+  try {
+    PREFS = await api('POST', '/api/preferences', {
+      avoid_days,
+      preferred_time: $('#pref-time').value,
+      notes: $('#pref-notes').value,
+    });
+    $('#pref-saved').hidden = false;
+    setTimeout(() => { $('#pref-saved').hidden = true; }, 1800);
+  } catch (ex) {
+    alert(ex.message);
+  }
+  btn.disabled = false;
+});
 
 // render
 
@@ -106,21 +207,16 @@ function render() {
 
   derived.subjects.forEach((s, i) => tint.set(s.subjectId, 't' + (i % 7)));
 
-  $('#week-label').textContent = win.label;
-  const upcoming = derived.tasks.filter((t) => t.date >= win.from && t.date <= win.to);
   $('#c-piano').textContent = '7g';
   $('#c-compiti').textContent = derived.tasks.filter((t) => t.date >= SYNC.today).length || '';
   $('#c-materie').textContent = derived.subjects.filter((s) => s.count).length || '';
   $('#c-bacheca').textContent = derived.notices.filter((n) => !n.read).length || '';
 
-  const tests = upcoming.filter((t) => t.kind === 'verifica').length;
-  const hw = upcoming.filter((t) => t.kind === 'compito').length;
-  $('#week-sub').innerHTML =
-    upcoming.length
-      ? `Nei prossimi sette giorni: <b>${tests} verifiche</b> e <b>${hw} consegne</b>. Il piano parte da qui, dalle medie e dagli argomenti firmati dai docenti.`
-      : 'Nessuna scadenza nei prossimi sette giorni. Il piano lavora sul recupero delle materie con media più bassa.';
+  const activeWeek = WEEKS.find((w) => w.offset === ACTIVE_OFFSET);
+  updateWeekHeader(activeWeek || win);
+  PLAN = PLANS.get(ACTIVE_OFFSET) || null;
+  PLAN ? renderPlan() : renderPlanShell(activeWeek || win);
 
-  renderPlanShell();
   renderTasks();
   renderSubjects();
   renderNotices();
@@ -135,15 +231,18 @@ const hhmm = (isoStr) => {
 
 // weekly plan
 
-function renderPlanShell() {
+function renderPlanShell(w) {
   if (PLAN) return renderPlan();
   $('#plan').innerHTML = '';
+  const period = w ? `per ${w.label}` : '';
   $('#plan-msg').innerHTML = `<div class="empty">
     <b>Piano non ancora generato</b>
-    <p>I dati del registro sono caricati. Premi genera: il modello riceve medie, scadenze e argomenti delle lezioni, senza i tuoi dati personali.</p>
+    <p>I dati del registro sono caricati. Premi genera: il modello riceve medie, scadenze e argomenti delle lezioni ${esc(period)}, senza i tuoi dati personali. Una volta generato resta salvato, non serve rifarlo ogni volta.</p>
     <button class="btn" data-go="regen"><i data-lucide="sparkles" width="15" height="15"></i>Genera il piano</button>
   </div>`;
   $('#plan-msg').querySelector('[data-go]').addEventListener('click', () => $('#regen').click());
+  $('#gen-at').textContent = '';
+  icons();
 }
 
 function deadlinesFor(date) {
@@ -162,10 +261,14 @@ function deadlinesFor(date) {
 }
 
 function renderPlan() {
-  $('#plan-msg').innerHTML = '';
   const p = PLAN.plan;
   $('#week-label').textContent = p.week_label;
-  $('#gen-at').textContent = `${hhmm(PLAN.meta.generatedAt)} · ${Math.round(p.totals.minutes / 6) / 10}h`;
+  $('#gen-at').textContent = `generato ${hhmm(PLAN.meta.generatedAt)} · ${Math.round(p.totals.minutes / 6) / 10}h`;
+
+  const stale = SYNC?.syncedAt && PLAN.meta.generatedAt && new Date(SYNC.syncedAt) > new Date(PLAN.meta.generatedAt);
+  $('#plan-msg').innerHTML = stale
+    ? `<div class="weekflag"><i data-lucide="info" width="14" height="14"></i>Il registro è stato risincronizzato dopo la generazione di questo piano: se sono cambiate scadenze o voti, rigeneralo.</div>`
+    : '';
 
   $('#plan').innerHTML = p.days
     .map((d, i) => {
@@ -174,7 +277,7 @@ function renderPlan() {
       const blocks = d.blocks
         .map(
           (b) => `<button class="block ${tint.get(b.subject_id) || 't6'}" style="--min:${b.minutes}" aria-expanded="false">
-        <div class="bh"><span class="sub">${esc(b.subject)}</span><span class="dur">${b.minutes}′</span></div>
+        <div class="bh"><span class="sub">${esc(b.subject)}</span><span class="dur">${b.minutes}′${b.fascia ? ` · ${esc(b.fascia)}` : ''}</span></div>
         <p class="note">${esc(b.topic)}</p>
         ${b.ref ? `<span class="tag">${esc(b.ref)}</span>` : ''}
         <div class="why">${esc(b.reason)}<span class="src">${esc(b.sources.join(' · '))}</span></div>
@@ -206,11 +309,12 @@ function renderPlan() {
 
 $('#regen').addEventListener('click', async () => {
   const btn = $('#regen');
+  const w = WEEKS.find((x) => x.offset === ACTIVE_OFFSET);
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Il modello pianifica…';
   $('#plan-msg').innerHTML = '';
   const widths = [260, 200, 300, 210, 240, 270, 190];
-  $('#plan').innerHTML = SYNC.window.days
+  $('#plan').innerHTML = (w?.days || SYNC.window.days)
     .map((date, i) => {
       const dt = new Date(date);
       return `<div class="row"><div class="date"><span class="dow">${DOW[dt.getDay()]}</span><span class="num">${dt.getDate()}</span></div>
@@ -218,7 +322,11 @@ $('#regen').addEventListener('click', async () => {
     })
     .join('');
   try {
-    PLAN = await api('POST', '/api/plan');
+    const res = await api('POST', '/api/plan', { offset: ACTIVE_OFFSET });
+    PLAN = { plan: res.plan, meta: res.meta };
+    PLANS.set(ACTIVE_OFFSET, PLAN);
+    if (w) { w.hasPlan = true; w.generatedAt = res.meta.generatedAt; }
+    renderWeekTabs();
     renderPlan();
   } catch (ex) {
     $('#plan').innerHTML = '';
@@ -397,7 +505,6 @@ $('#resync').addEventListener('click', async (e) => {
   b.disabled = true;
   b.innerHTML = '<span class="spin"></span>Rileggo gli endpoint…';
   try {
-    PLAN = null;
     await loadSync(true);
   } catch (ex) {
     alert(ex.message);
