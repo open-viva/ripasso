@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(ROOT, 'data');
+const DATA_DIR = process.env.DATA_DIR
+  ?? (ROOT.startsWith('/var/task') ? '/tmp/ripasso-data' : path.join(ROOT, 'data'));
 
 export const DEFAULT_PREFERENCES = {
   avoid_days: [], // sottoinsieme di lun mar mer gio ven sab dom
